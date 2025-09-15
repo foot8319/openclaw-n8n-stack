@@ -1,0 +1,268 @@
+{
+  "name": "Service Health Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://openclaw:8080/healthz",
+        "options": {
+          "timeout": 5000,
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000002",
+      "name": "OpenClaw Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 160],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:5678/healthz",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000003",
+      "name": "n8n Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 340],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://postgres:5432/",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000004",
+      "name": "Postgres Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByFields": {
+          "values": []
+        },
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000010",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [720, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate health check results from all services\nconst items = $input.all();\n\nfunction getStatus(item) {\n  if (!item || !item.json) return 'unknown';\n  const json = item.json;\n  // Check for error indicators\n  if (json.error || json.code === 'ECONNREFUSED' || json.code === 'ETIMEDOUT') return 'unhealthy';\n  if (json.statusCode && json.statusCode >= 400) return 'unhealthy';\n  return 'healthy';\n}\n\n// Get results from previous nodes\nconst openclawResult = $('OpenClaw Health').first();\nconst n8nResult = $('n8n Health').first();\nconst postgresResult = $('Postgres Health').first();\n\nconst services = {\n  openclaw: {\n    status: getStatus(openclawResult),\n    url: 'http://openclaw:8080/healthz',\n    response_code: openclawResult?.json?.statusCode || null\n  },\n  n8n: {\n    status: getStatus(n8nResult),\n    url: 'http://localhost:5678/healthz',\n    response_code: n8nResult?.json?.statusCode || null\n  },\n  postgres: {\n    status: getStatus(postgresResult),\n    url: 'http://postgres:5432/',\n    response_code: postgresResult?.json?.statusCode || null\n  }\n};\n\nconst unhealthyServices = Object.entries(services)\n  .filter(([_, s]) => s.status !== 'healthy')\n  .map(([name, _]) => name);\n\nconst allHealthy = unhealthyServices.length === 0;\n\nreturn [{\n  json: {\n    all_healthy: allHealthy,\n    checked_at: new Date().toISOString(),\n    services: services,\n    unhealthy_services: unhealthyServices,\n    summary: allHealthy\n      ? 'All services operational'\n      : `ALERT: ${unhealthyServices.join(', ')} unhealthy`\n  }\n}];"
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000005",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "health-check",
+              "leftValue": "={{ $json.all_healthy }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000006",
+      "name": "Any Unhealthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: ':rotating_light: *OpenClaw Service Alert*\\n\\n' + $json.summary + '\\n\\nUnhealthy: ' + $json.unhealthy_services.join(', ') + '\\nChecked: ' + $json.checked_at + '\\n\\nServices:\\n' + Object.entries($json.services).map(([name, s]) => '- ' + name + ': ' + s.status).join('\\n') }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000007",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 240]
+    },
+    {
+      "parameters": {
+        "content": "## Service Health Check\n\n**Purpose:** Proactive monitoring of OpenClaw stack services.\nNo LLM involvement - pure infrastructure monitoring.\n\n**Schedule:** Every 15 minutes\n\n**Services checked:**\n1. OpenClaw API (healthz endpoint)\n2. n8n (healthz endpoint)\n3. PostgreSQL (connection check)\n\n**Alert:** Sends Slack notification if any service is unhealthy.\n\n**Setup:**\n1. Update service URLs to match your docker-compose network\n2. Set Slack webhook URL\n3. Activate workflow\n\n**Note:** This is a scheduled workflow, NOT webhook-triggered.\nNo Respond to Webhook node needed.",
+        "height": 400,
+        "width": 380
+      },
+      "id": "f6a7b8c9-6666-4000-8000-000000000008",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -160]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "OpenClaw Health",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "n8n Health",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Postgres Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenClaw Health": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "n8n Health": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Postgres Health": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Any Unhealthy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Unhealthy?": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "openclaw-n8n-stack"
+  },
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "infrastructure"
+    }
+  ]
+}

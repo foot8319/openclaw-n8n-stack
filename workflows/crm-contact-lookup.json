@@ -1,0 +1,146 @@
+{
+  "name": "MCP: CRM Contact Lookup",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mcp/crm-lookup",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-1111-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "crm-contact-lookup"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.example.com/contacts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{ $json.body.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.body.phone }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_CRM_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "a1b2c3d4-1111-4000-8000-000000000002",
+      "name": "CRM API Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format CRM response into structured output for OpenClaw\nconst crmData = $input.first().json;\n\n// Handle empty/not-found responses\nif (!crmData || (Array.isArray(crmData) && crmData.length === 0)) {\n  return [{\n    json: {\n      success: true,\n      found: false,\n      contact: null,\n      message: 'No contact found matching the search criteria'\n    }\n  }];\n}\n\nconst contact = Array.isArray(crmData) ? crmData[0] : crmData;\n\nreturn [{\n  json: {\n    success: true,\n    found: true,\n    contact: {\n      id: contact.id || null,\n      first_name: contact.first_name || contact.firstName || null,\n      last_name: contact.last_name || contact.lastName || null,\n      email: contact.email || null,\n      phone: contact.phone || null,\n      status: contact.status || null,\n      created_at: contact.created_at || contact.createdAt || null,\n      tags: contact.tags || [],\n      custom_fields: contact.custom_fields || {}\n    },\n    source: 'crm',\n    retrieved_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "a1b2c3d4-1111-4000-8000-000000000003",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1b2c3d4-1111-4000-8000-000000000004",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "content": "## MCP: CRM Contact Lookup\n\n**Purpose:** Replace LLM doing CRM lookups via OpenClaw MCP.\n\n**Token savings:** ~5,000 tokens per call\n\n**Flow:** Webhook (POST /mcp/crm-lookup) -> CRM API -> Format -> Respond\n\n**Expected payload:**\n```json\n{\n  \"email\": \"client@example.com\",\n  \"phone\": \"+14075551234\"\n}\n```\n\n**Setup:**\n1. Replace CRM API URL with your Lawmatics/CRM endpoint\n2. Set Authorization header with real API key\n3. Activate workflow",
+        "height": 380,
+        "width": 340
+      },
+      "id": "a1b2c3d4-1111-4000-8000-000000000005",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -120]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "CRM API Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM API Lookup": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "openclaw-n8n-stack"
+  },
+  "tags": [
+    {
+      "name": "mcp"
+    },
+    {
+      "name": "token-saver"
+    }
+  ]
+}

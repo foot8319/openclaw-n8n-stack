@@ -1,0 +1,136 @@
+{
+  "name": "MCP: Calendar Availability Check",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mcp/calendar-check",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d4e5f6a7-4444-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "calendar-availability-check"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GOOGLE_CALENDAR_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ timeMin: $json.body.start_date || new Date().toISOString(), timeMax: $json.body.end_date || new Date(Date.now() + 7*24*60*60*1000).toISOString(), items: [{ id: $json.body.calendar_id || 'primary' }] }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d4e5f6a7-4444-4000-8000-000000000002",
+      "name": "Google Calendar FreeBusy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Google Calendar FreeBusy response and find available slots\nconst calendarResponse = $input.first().json;\nconst webhookInput = $('Webhook').first().json.body;\n\n// Get busy periods from response\nconst calendarId = webhookInput.calendar_id || 'primary';\nconst calendars = calendarResponse.calendars || {};\nconst busyPeriods = calendars[calendarId]?.busy || [];\n\n// Define business hours for slot generation\nconst slotDuration = webhookInput.duration_minutes || 30;\nconst businessStart = webhookInput.business_start_hour || 9; // 9 AM\nconst businessEnd = webhookInput.business_end_hour || 17;     // 5 PM\n\nconst startDate = new Date(webhookInput.start_date || new Date().toISOString());\nconst endDate = new Date(webhookInput.end_date || new Date(Date.now() + 7*24*60*60*1000).toISOString());\n\n// Generate available slots (business hours, skip weekends)\nconst availableSlots = [];\nconst current = new Date(startDate);\ncurrent.setMinutes(0, 0, 0);\n\nwhile (current < endDate && availableSlots.length < 20) {\n  const dayOfWeek = current.getDay();\n  const hour = current.getHours();\n\n  // Skip weekends (0=Sun, 6=Sat)\n  if (dayOfWeek === 0 || dayOfWeek === 6) {\n    current.setDate(current.getDate() + 1);\n    current.setHours(businessStart, 0, 0, 0);\n    continue;\n  }\n\n  // Skip outside business hours\n  if (hour < businessStart) {\n    current.setHours(businessStart, 0, 0, 0);\n    continue;\n  }\n  if (hour >= businessEnd) {\n    current.setDate(current.getDate() + 1);\n    current.setHours(businessStart, 0, 0, 0);\n    continue;\n  }\n\n  const slotEnd = new Date(current.getTime() + slotDuration * 60000);\n\n  // Check if slot overlaps any busy period\n  const isBusy = busyPeriods.some(busy => {\n    const busyStart = new Date(busy.start);\n    const busyEnd = new Date(busy.end);\n    return current < busyEnd && slotEnd > busyStart;\n  });\n\n  if (!isBusy) {\n    availableSlots.push({\n      start: current.toISOString(),\n      end: slotEnd.toISOString(),\n      date: current.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),\n      time: current.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' })\n    });\n  }\n\n  current.setMinutes(current.getMinutes() + slotDuration);\n}\n\nreturn [{\n  json: {\n    success: true,\n    available_slots: availableSlots,\n    total_slots: availableSlots.length,\n    busy_periods: busyPeriods.length,\n    search_range: {\n      start: startDate.toISOString(),\n      end: endDate.toISOString()\n    },\n    slot_duration_minutes: slotDuration,\n    checked_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "d4e5f6a7-4444-4000-8000-000000000003",
+      "name": "Format Available Slots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "d4e5f6a7-4444-4000-8000-000000000004",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "content": "## MCP: Calendar Availability Check\n\n**Purpose:** Replace LLM checking calendar availability.\n\n**Token savings:** ~3,000 tokens per call\n\n**Flow:** Webhook -> Google Calendar FreeBusy -> Parse & find slots -> Respond\n\n**Expected payload:**\n```json\n{\n  \"calendar_id\": \"primary\",\n  \"start_date\": \"2026-04-01T00:00:00Z\",\n  \"end_date\": \"2026-04-07T23:59:59Z\",\n  \"duration_minutes\": 30,\n  \"business_start_hour\": 9,\n  \"business_end_hour\": 17\n}\n```\n\n**Returns:** Up to 20 available slots within business hours (Mon-Fri).\n\n**Setup:**\n1. Set Google Calendar OAuth token\n2. Update calendar_id if not using primary\n3. Activate workflow",
+        "height": 400,
+        "width": 360
+      },
+      "id": "d4e5f6a7-4444-4000-8000-000000000005",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -160]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar FreeBusy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar FreeBusy": {
+      "main": [
+        [
+          {
+            "node": "Format Available Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Available Slots": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "openclaw-n8n-stack"
+  },
+  "tags": [
+    {
+      "name": "mcp"
+    },
+    {
+      "name": "token-saver"
+    }
+  ]
+}

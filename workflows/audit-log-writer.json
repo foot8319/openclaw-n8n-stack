@@ -1,0 +1,160 @@
+{
+  "name": "MCP: Audit Log Writer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mcp/audit-log",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "audit-log-writer"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Mask PII in audit log data\n// Emails -> ***@***.com\n// Phones -> ***-***-XXXX (last 4 preserved)\n\nconst input = $input.first().json.body;\n\nfunction maskEmail(str) {\n  if (!str || typeof str !== 'string') return str;\n  return str.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g, '***@***.com');\n}\n\nfunction maskPhone(str) {\n  if (!str || typeof str !== 'string') return str;\n  // Match various phone formats and preserve last 4 digits\n  return str.replace(/(\\+?1?[\\s.-]?)?(\\(?\\d{3}\\)?[\\s.-]?)(\\d{3})[\\s.-]?(\\d{4})/g, '***-***-$4');\n}\n\nfunction maskValue(value) {\n  if (typeof value === 'string') {\n    let masked = maskEmail(value);\n    masked = maskPhone(masked);\n    return masked;\n  }\n  if (Array.isArray(value)) {\n    return value.map(v => maskValue(v));\n  }\n  if (typeof value === 'object' && value !== null) {\n    return maskObject(value);\n  }\n  return value;\n}\n\nfunction maskObject(obj) {\n  const masked = {};\n  for (const [key, value] of Object.entries(obj)) {\n    // Always mask fields that are obviously PII\n    const piiFields = ['email', 'phone', 'ssn', 'dob', 'date_of_birth', 'address'];\n    if (piiFields.includes(key.toLowerCase())) {\n      masked[key] = typeof value === 'string' ? maskValue(value) : '[REDACTED]';\n    } else {\n      masked[key] = maskValue(value);\n    }\n  }\n  return masked;\n}\n\nconst maskedData = input.data ? maskObject(input.data) : {};\n\nreturn [{\n  json: {\n    action: input.action || 'unknown',\n    actor: input.actor || 'system',\n    data_masked: maskedData,\n    data_original_keys: input.data ? Object.keys(input.data) : [],\n    pii_masked: true\n  }\n}];"
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000002",
+      "name": "Mask PII",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Add timestamp, metadata, and structure the audit log entry\nconst input = $input.first().json;\n\nconst logEntry = {\n  log_id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),\n  timestamp: new Date().toISOString(),\n  action: input.action,\n  actor: input.actor,\n  data: input.data_masked,\n  metadata: {\n    source: 'openclaw-mcp',\n    workflow: 'audit-log-writer',\n    pii_masked: input.pii_masked,\n    original_field_count: input.data_original_keys.length,\n    fields: input.data_original_keys,\n    environment: 'production',\n    version: '1.0'\n  }\n};\n\nreturn [{ json: logEntry }];"
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000003",
+      "name": "Add Timestamp & Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.airtable.com/v0/YOUR_BASE_ID/Audit%20Log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_AIRTABLE_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { 'Log ID': $json.log_id, 'Timestamp': $json.timestamp, 'Action': $json.action, 'Actor': $json.actor, 'Data': JSON.stringify($json.data), 'Source': $json.metadata.source, 'Environment': $json.metadata.environment } }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000004",
+      "name": "Write to Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, log_id: $('Add Timestamp & Metadata').first().json.log_id, record_id: $json.id, pii_masked: true, logged_at: $('Add Timestamp & Metadata').first().json.timestamp } }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000005",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "content": "## MCP: Audit Log Writer\n\n**Purpose:** Replace LLM writing audit logs. Auto-masks PII.\n\n**Token savings:** ~2,000 tokens per call\n\n**PII Masking Rules:**\n- Emails: `john@example.com` -> `***@***.com`\n- Phones: `+1 (407) 555-1234` -> `***-***-1234`\n- SSN, DOB, Address fields: `[REDACTED]`\n- Recursive masking on nested objects\n\n**Expected payload:**\n```json\n{\n  \"action\": \"contact_created\",\n  \"actor\": \"openclaw-agent\",\n  \"data\": {\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"phone\": \"+14075551234\",\n    \"case_type\": \"PI\"\n  }\n}\n```\n\n**Setup:**\n1. Set Airtable base ID and API key\n2. Create 'Audit Log' table with fields: Log ID, Timestamp, Action, Actor, Data, Source, Environment\n3. Activate workflow",
+        "height": 480,
+        "width": 380
+      },
+      "id": "e5f6a7b8-5555-4000-8000-000000000006",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -220]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Mask PII",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mask PII": {
+      "main": [
+        [
+          {
+            "node": "Add Timestamp & Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Timestamp & Metadata": {
+      "main": [
+        [
+          {
+            "node": "Write to Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Audit Log": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "openclaw-n8n-stack"
+  },
+  "tags": [
+    {
+      "name": "mcp"
+    },
+    {
+      "name": "token-saver"
+    },
+    {
+      "name": "audit"
+    }
+  ]
+}
