@@ -45,7 +45,7 @@ graph TB
 
 ```bash
 # 1. Clone
-git clone https://github.com/lorenzejay/openclaw-n8n-stack.git
+git clone https://github.com/lorenzespinosa/openclaw-n8n-stack.git
 cd openclaw-n8n-stack
 
 # 2. Configure
